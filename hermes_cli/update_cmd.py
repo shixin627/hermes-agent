@@ -1685,8 +1685,8 @@ def _update_complete_message(pre_version: str | None) -> str:
     if post_version:
         return f"✓ Update complete! (v{post_version})"
     return "✓ Update complete!"
- 
- 
+
+
 def _clear_stale_sqlite_sidecars(db_path: Path) -> None:
     """Delete the WAL / shared-memory / rollback-journal files next to *db_path*.
 
