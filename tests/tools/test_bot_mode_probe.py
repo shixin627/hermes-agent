@@ -47,7 +47,9 @@ def test_emits_for_default_when_any_profile_is_managed(tmp_path):
     _make_bot_profile(home, "researcher", managed=True)
 
     section = bot_mode_probe.get_bot_mode_protocol_section(home)
-    assert section.startswith("## Messaging other agents")
+    assert section.startswith("## Response style")
+    assert "Lead with the answer or outcome" in section
+    assert "## Messaging other agents" in section
     # default's callable alias is @hermes, never @default
     assert "@hermes" in section
     assert "@default" not in section
@@ -94,15 +96,17 @@ def test_roster_lines_carry_roles(tmp_path):
     assert "Deep research and literature review" in section
 
 
-def test_silent_when_soul_already_carries_protocol(tmp_path):
-    """Legacy plugin-side append — never double the section."""
+def test_legacy_soul_keeps_style_without_doubling_protocol(tmp_path):
+    """Legacy plugin-side append keeps the shared style without duplication."""
     home = tmp_path / ".hermes"
     home.mkdir()
     _make_bot_profile(home, "coder", managed=True)
     (home / "SOUL.md").write_text(
         "# Me\n\n## Messaging other agents\nold plugin text\n", encoding="utf-8"
     )
-    assert bot_mode_probe.get_bot_mode_protocol_section(home) == ""
+    section = bot_mode_probe.get_bot_mode_protocol_section(home)
+    assert section.startswith("## Response style")
+    assert "## Messaging other agents" not in section
 
 
 def test_deterministic_across_calls(tmp_path):
@@ -211,15 +215,21 @@ def test_legacy_bot_chat_upgrade(tmp_path):
     upgraded = legacy + "\n\n" + bot_mode_probe.get_bot_mode_protocol_section(home) + "\n\n" + bot_mode_probe.epoch_line(home)
     assert not bot_mode_probe.stored_bot_chat_prompt_needs_upgrade(upgraded, home)
 
-    # SOUL already carries the legacy plugin-side append → probe silent →
-    # no upgrade (rebuilding would loop: the new prompt would be unstamped too)
+    # SOUL already carries the legacy plugin-side append → rebuild once to
+    # add the shared response style without duplicating the protocol.
     bot_mode_probe._reset_cache_for_tests()
     (home / "SOUL.md").write_text("# Me\n\n## Messaging other agents\nlegacy\n", encoding="utf-8")
-    assert not bot_mode_probe.stored_bot_chat_prompt_needs_upgrade(legacy, home)
+    assert bot_mode_probe.stored_bot_chat_prompt_needs_upgrade(legacy, home)
 
-    # prompt whose SOUL section rode into it → protocol heading present → no upgrade
-    assert not bot_mode_probe.stored_bot_chat_prompt_needs_upgrade(
+    # Old prompt whose SOUL section rode into it still upgrades because it
+    # predates the shared response style.
+    assert bot_mode_probe.stored_bot_chat_prompt_needs_upgrade(
         "prompt containing\n## Messaging other agents\nfrom SOUL", home
+    )
+
+    # A prompt already carrying the style never loops, even without a stamp.
+    assert not bot_mode_probe.stored_bot_chat_prompt_needs_upgrade(
+        "prompt containing\n## Response style\nconcise", home
     )
 
     # unmanaged install → probe silent → never upgrades

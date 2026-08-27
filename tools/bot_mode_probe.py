@@ -34,6 +34,13 @@ import threading
 from pathlib import Path
 
 _PROTOCOL_HEADING = "## Messaging other agents"
+_RESPONSE_STYLE_HEADING = "## Response style"
+_RESPONSE_STYLE = """## Response style
+Reply in the user's language. Sound like a capable teammate in a chat, not a work log.
+
+Lead with the answer or outcome. For simple or completed work, use 1-3 short paragraphs with no heading. Mention only the result, the key reason or change, and any important risk. Omit routine tool narration, command output, file lists, diff statistics, test counts, and commit hashes unless the user asks or they materially affect the answer. For coding work, default to: result, key change, verification. Use bullets only when there are at least three distinct items.
+
+Expand when the user asks or the task genuinely needs detail. Never hide failures, uncertainty, warnings, or required user action."""
 
 # The canonical per-bot conversation title — the only session shape that
 # receives the protocol section. Must match the desktop plugin's
@@ -247,16 +254,14 @@ def _build_section(home: Path) -> str:
     if not any(_is_bot_managed(d) for _n, d in roster):
         return ""
 
-    # An older plugin build may have appended the protocol to SOUL.md
-    # already — never double it up.
+    # An older plugin build may have appended the messaging protocol to
+    # SOUL.md already. Keep the shared response style, but never double the
+    # protocol itself.
     my_dir = home if me == "default" else root / "profiles" / me
-    if _soul_has_protocol(my_dir):
-        return ""
-
     handle = _handle(me)
     roster_block = "\n".join(_roster_lines(root, me)) or "- (no teammates yet)"
 
-    return (
+    messaging = (
         f"{_PROTOCOL_HEADING}\n"
         "This install runs Bot Mode: each Hermes profile is an agent teammate with "
         'one canonical "Bot Chat" conversation, and you have the `message_agent` '
@@ -283,6 +288,9 @@ def _build_section(home: Path) -> str:
         + _remote_paragraph(root)
         + _peer_paragraph(root)
     )
+    if _soul_has_protocol(my_dir):
+        return _RESPONSE_STYLE
+    return f"{_RESPONSE_STYLE}\n\n{messaging}"
 
 
 def get_bot_mode_protocol_section(home: str | os.PathLike | None = None, *, force_refresh: bool = False) -> str:
@@ -383,7 +391,7 @@ def capability_fingerprint(home: str | os.PathLike | None = None) -> str:
     # Protocol-text version salt: bumping this refreshes every eternal Bot
     # Chat prompt ONCE so existing bots adopt a new protocol section (e.g.
     # the v2 message_agent tool replacing the shellout instructions).
-    surface["protocol_version"] = 2
+    surface["protocol_version"] = 3
     try:
         # Peer gateways are part of the messaging surface: registering one
         # must refresh eternal Bot Chat prompts so the cross-machine DM
@@ -440,25 +448,19 @@ def stored_prompt_capability_stale(stored_prompt: str, home: str | os.PathLike |
 def stored_bot_chat_prompt_needs_upgrade(stored_prompt: str, home: str | os.PathLike | None = None) -> bool:
     """True when a Bot Chat session's stored prompt PREDATES this feature.
 
-    Legacy Bot Chats (created before bundling / this epoch mechanism)
-    persisted prompts with no protocol section and no epoch stamp; without
-    an explicit upgrade they would be stranded forever — the staleness check
-    above only fires on stamped prompts. This is a one-time migration per
-    legacy session: the caller must only invoke it for sessions titled
-    "Bot Chat", and only rebuilds when the probe would actually emit a
-    section (a profile whose SOUL.md already carries the legacy plugin-side
-    append keeps its protocol-free prompt — rebuilding those would loop,
-    since the probe stays silent and the rebuilt prompt would be unstamped
-    again). Fails closed to "no upgrade".
+    Legacy Bot Chats persisted prompts with no epoch stamp. This one-time
+    migration also catches prompts that already contain the old messaging
+    protocol but predate the shared response style. The caller title-gates
+    this to "Bot Chat"; a successful rebuild carries an epoch stamp, so the
+    migration cannot re-fire. Fails closed to "no upgrade".
     """
     try:
         if _EPOCH_PREFIX in (stored_prompt or ""):
             return False
-        if _PROTOCOL_HEADING in (stored_prompt or ""):
+        if _RESPONSE_STYLE_HEADING in (stored_prompt or ""):
             return False
-        # Only upgrade when the rebuild would actually add the section —
-        # this is what guarantees the rebuilt prompt carries a stamp and
-        # the upgrade can never re-fire.
+        # Only upgrade when the rebuild would actually add the shared style
+        # section and therefore receive an epoch stamp.
         return bool(get_bot_mode_protocol_section(home))
     except Exception:
         return False
