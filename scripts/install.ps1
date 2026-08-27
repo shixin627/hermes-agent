@@ -383,8 +383,11 @@ $script:ResolvedPathReport = @{
 # Configuration
 # ============================================================================
 
-$RepoUrlSsh = "git@github.com:NousResearch/hermes-agent.git"
-$RepoUrlHttps = "https://github.com/NousResearch/hermes-agent.git"
+# Internal bootstrap override used by products that ship a reviewed Hermes
+# fork at an exact commit. Ordinary Hermes installs keep the official origin.
+$RepoUrlSsh = if ($env:HERMES_INSTALL_REPO_SSH) { $env:HERMES_INSTALL_REPO_SSH } else { "git@github.com:NousResearch/hermes-agent.git" }
+$RepoUrlHttps = if ($env:HERMES_INSTALL_REPO_HTTPS) { $env:HERMES_INSTALL_REPO_HTTPS } else { "https://github.com/NousResearch/hermes-agent.git" }
+$RepoArchiveBase = $RepoUrlHttps -replace '\.git$', ''
 $PythonVersion = "3.11"
 # Minor versions the installer accepts when the requested $PythonVersion isn't
 # available, in preference order.  uv discovers both uv-managed and system
@@ -2051,6 +2054,13 @@ function Install-Repository {
             $ErrorActionPreference = "Continue"
             $autostashRef = ""
             try {
+                # A managed product may migrate an existing official checkout
+                # to its reviewed fork. Switch origin before fetching the
+                # pinned commit; this is idempotent on later app upgrades.
+                if ($env:HERMES_INSTALL_REPO_HTTPS) {
+                    git -c windows.appendAtomically=false remote set-url origin $RepoUrlHttps
+                    if ($LASTEXITCODE -ne 0) { throw "git remote set-url failed (exit $LASTEXITCODE)" }
+                }
                 # This is a MANAGED checkout, not a repo the user edits. Git for
                 # Windows defaults to core.autocrlf=true, which renormalizes the
                 # repo's LF-only text files to CRLF in the working tree -- so
@@ -2281,13 +2291,13 @@ function Install-Repository {
                 # for.  GitHub supports archive URLs for commits, tags, and
                 # branches; we honour Commit > Tag > Branch.
                 if ($Commit) {
-                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/$Commit.zip"
+                    $zipUrl = "$RepoArchiveBase/archive/$Commit.zip"
                     $zipLabel = $Commit
                 } elseif ($Tag) {
-                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/refs/tags/$Tag.zip"
+                    $zipUrl = "$RepoArchiveBase/archive/refs/tags/$Tag.zip"
                     $zipLabel = $Tag
                 } else {
-                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/refs/heads/$Branch.zip"
+                    $zipUrl = "$RepoArchiveBase/archive/refs/heads/$Branch.zip"
                     $zipLabel = $Branch
                 }
                 $zipPath = "$env:TEMP\hermes-agent-$zipLabel.zip"

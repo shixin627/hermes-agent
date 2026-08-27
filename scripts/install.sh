@@ -43,8 +43,10 @@ NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # Configuration
-REPO_URL_SSH="git@github.com:NousResearch/hermes-agent.git"
-REPO_URL_HTTPS="https://github.com/NousResearch/hermes-agent.git"
+# Internal bootstrap override used by products that ship a reviewed Hermes
+# fork at an exact commit. Ordinary Hermes installs keep the official origin.
+REPO_URL_SSH="${HERMES_INSTALL_REPO_SSH:-git@github.com:NousResearch/hermes-agent.git}"
+REPO_URL_HTTPS="${HERMES_INSTALL_REPO_HTTPS:-https://github.com/NousResearch/hermes-agent.git}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 # INSTALL_DIR is resolved AFTER arg parsing and OS detection so we can pick an
 # FHS-style layout for root installs.  Track whether the user gave us an
@@ -1357,6 +1359,13 @@ clone_repo() {
         if [ -d "$INSTALL_DIR/.git" ]; then
             log_info "Existing installation found, updating..."
             cd "$INSTALL_DIR"
+
+            # A managed product may migrate an existing official checkout to
+            # its reviewed fork. Switch origin before fetching the pinned
+            # commit; this is idempotent on later app upgrades.
+            if [ -n "${HERMES_INSTALL_REPO_HTTPS:-}" ]; then
+                git remote set-url origin "$REPO_URL_HTTPS"
+            fi
 
             local autostash_ref=""
             discard_update_lockfile_churn "$INSTALL_DIR"
