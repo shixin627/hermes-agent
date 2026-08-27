@@ -36,8 +36,8 @@ def _(rid, params: dict) -> dict:
 
         Rosters show this under each agent's name — messaging-app semantics
         (latest exchange), unlike the shared first-message preview that
-        session lists use for recognition. Tool rows, inactive rows, and
-        empty content are skipped; agent-delivery prefixes are kept
+        session lists use for recognition. Tool rows, timeline markers,
+        inactive rows, and empty content are skipped; agent-delivery prefixes are kept
         (callers style them). Same query shape as
         SessionDB.latest_message_row_id.
         """
@@ -47,6 +47,7 @@ def _(rid, params: dict) -> dict:
                     "SELECT content FROM messages"
                     " WHERE session_id = ? AND role IN ('user', 'assistant')"
                     " AND active = 1"
+                    " AND (display_kind IS NULL OR display_kind = '')"
                     " AND content IS NOT NULL AND TRIM(content) != ''"
                     " ORDER BY id DESC LIMIT 1",
                     (session_id,),
