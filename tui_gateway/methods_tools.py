@@ -1685,6 +1685,29 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5033, str(e))
 
 
+@method("cron.cloud_results")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    from cron.cloud_delivery import pending, acknowledge
+    account = str(params.get("accountUid") or "")
+    if not account:
+        return _err(rid, 4000, "Account required")
+    if params.get("ack"):
+        acknowledge(account, str(params["ack"]))
+        return _ok(rid, {"acknowledged": True})
+    from hermes_cli.profiles import list_profile_names
+    results = []
+    for profile in list_profile_names():
+        home = _profile_home(profile)
+        token = set_hermes_home_override(home) if home is not None else None
+        try:
+            results.extend({**row, "profile": profile} for row in pending(account))
+        finally:
+            if token is not None:
+                reset_hermes_home_override(token)
+    return _ok(rid, {"results": results})
+
+
 @method("cron.manage")
 def _(rid, params: dict) -> dict:
     action, jid = params.get("action", "list"), params.get("name", "")

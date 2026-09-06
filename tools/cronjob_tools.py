@@ -315,6 +315,10 @@ def _scan_cron_skill_assembled(assembled: str) -> tuple[str, str]:
 
 def _origin_from_env() -> Optional[Dict[str, str]]:
     from gateway.session_context import get_session_env
+    from cron.cloud_delivery import origin
+    cloud = origin(get_session_env("HERMES_SESSION_KEY"))
+    if cloud:
+        return cloud
     origin_platform = get_session_env("HERMES_SESSION_PLATFORM")
     origin_chat_id = get_session_env("HERMES_SESSION_CHAT_ID")
     if origin_platform and origin_chat_id:
@@ -560,6 +564,10 @@ def _validate_bot_chat_deliver(deliver: Optional[str]) -> Optional[str]:
     """
     if not deliver:
         return None
+    if any(p.strip().lower() == "bot-chat" or p.strip().lower().startswith("bot-chat:")
+           for p in str(deliver).split(",")):
+        if (_origin_from_env() or {}).get("platform") == "skailink":
+            return "SkaiLink uses cloud conversations. Use deliver='origin' to return output here; do not create a local Bot Chat."
     try:
         from cron.scheduler import parse_bot_chat_deliver_token
         from hermes_cli.profiles import normalize_profile_name, profile_exists
@@ -1683,6 +1691,12 @@ def cronjob(
                 updates["deliver"] = _resolve_cron_context_deliver(
                     _normalize_deliver_param(deliver)
                 )
+                # An explicit "deliver to this conversation" repairs old local-only
+                # jobs using the host-bound origin, never a model-supplied cloud id.
+                if updates["deliver"] == "origin":
+                    current_origin = _origin_from_env()
+                    if current_origin and current_origin.get("platform") == "skailink":
+                        updates["origin"] = current_origin
             if skills is not None or skill is not None:
                 canonical_skills = _canonical_skills(skill, skills)
                 updates["skills"] = canonical_skills
