@@ -3076,6 +3076,14 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
 
     Returns None on success, or an error string on failure.
     """
+    parts = [p.strip() for p in _normalize_deliver_value(job.get("deliver", "local")).split(",")]
+    if (job.get("origin") or {}).get("platform") == "skailink" and "origin" in parts:
+        from cron.cloud_delivery import enqueue
+        enqueue(job, content)
+        remaining = [p for p in parts if p != "origin"]
+        if not remaining:
+            return None
+        job = {**job, "deliver": ",".join(remaining)}
     targets = _resolve_delivery_targets(job)
     if not targets:
         deliver_value = _normalize_deliver_value(job.get("deliver", "local"))
@@ -7013,6 +7021,7 @@ def _run_one_job_body(
     execution_id = job.get("execution_id")
     if not execution_id:
         execution_id = create_execution(job["id"], source="direct")["id"]
+    job = {**job, "execution_id": execution_id}
     delivery_attempted = False
     delivery_error = None
     # Durable failure-incident bookkeeping for this run (see cron.incidents):
@@ -7042,7 +7051,9 @@ def _run_one_job_body(
 
         # The attempt is claimed durably before executor/provider dispatch and
         # becomes running only immediately before the actual run.
-        mark_execution_running(execution_id)
+        running_execution = mark_execution_running(execution_id)
+        if running_execution:
+            job["execution_started_at"] = running_execution.get("started_at")
 
         # Run the job under the profile's secret scope. get_secret() fails
         # closed outside a scope once profile isolation is in play (multiple
