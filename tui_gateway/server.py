@@ -6273,6 +6273,18 @@ def _sync_session_key_after_compress(
     if not new_session_id or new_session_id == old_key:
         return
 
+    # The live runtime id survives compression; retain its cloud return address
+    # on the new durable key before tools can create another scheduled job.
+    if session.get("cloud_delivery_binding"):
+        from cron.cloud_delivery import bind
+        from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+        token = set_hermes_home_override(session["profile_home"]) if session.get("profile_home") else None
+        try:
+            bind(new_session_id, session["cloud_delivery_binding"])
+        finally:
+            if token is not None:
+                reset_hermes_home_override(token)
+
     lease_reanchored = _transfer_active_session_slot(
         sid,
         session,

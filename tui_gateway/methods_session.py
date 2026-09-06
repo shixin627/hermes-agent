@@ -1379,14 +1379,15 @@ def _(rid, params: dict) -> dict:
 def _(rid, params: dict) -> dict:
     from cron.cloud_delivery import bind
     from hermes_constants import set_hermes_home_override, reset_hermes_home_override
-    key = str(params.get("session_key") or "")
     with _sessions_lock:
-        session = next((s for s in _sessions.values() if s.get("session_key") == key), None)
+        session = _sessions.get(params.get("session_id"))
     if session is None or not session.get("pending_hidden"):
         return _err(rid, 4000, "Cloud binding requires a hidden execution session")
     token = set_hermes_home_override(session["profile_home"]) if session.get("profile_home") else None
     try:
-        bind(key, params.get("binding") or {})
+        binding = params.get("binding") or {}
+        bind(session["session_key"], binding)
+        session["cloud_delivery_binding"] = binding
         return _ok(rid, {"bound": True})
     except ValueError as e:
         return _err(rid, 4000, str(e))
