@@ -57,8 +57,9 @@ def enqueue(job, content):
     if not execution:
         raise ValueError("Cloud delivery requires a durable execution id")
     # Preserve complete output, including failed-run notices. Never truncate silently.
+    stamp = f'\n執行時間：{job["execution_started_at"]}' if job.get("execution_started_at") else ""
     body = {**binding, "idempotencyKey": str(execution),
-            "content": f'排程「{job.get("name") or job["id"]}」\n\n{content}'}
+            "content": f'排程「{job.get("name") or job["id"]}」{stamp}\n\n{content}'}
     encoded = json.dumps(body, ensure_ascii=False, sort_keys=True)
     with _db() as db:
         old = db.execute("SELECT body FROM results WHERE id=?", (str(execution),)).fetchone()
