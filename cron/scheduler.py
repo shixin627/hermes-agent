@@ -7051,7 +7051,9 @@ def _run_one_job_body(
 
         # The attempt is claimed durably before executor/provider dispatch and
         # becomes running only immediately before the actual run.
-        mark_execution_running(execution_id)
+        running_execution = mark_execution_running(execution_id)
+        if running_execution:
+            job["execution_started_at"] = running_execution.get("started_at")
 
         # Run the job under the profile's secret scope. get_secret() fails
         # closed outside a scope once profile isolation is in play (multiple
