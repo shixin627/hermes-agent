@@ -1560,6 +1560,84 @@ def _(rid, params: dict) -> dict:
     return _ok(rid, {"text": text})
 
 
+@method("anticipate.suggest")
+def _(rid, params: dict) -> dict:
+    """Propose what the user probably wants done now, from memory + episodes + context.
+
+    Params: ``{"context": {...}, "limit": 3, "session_id": optional}``.
+    Result: ``{"suggestions": [{"id","label","prompt","files","reason"}]}``;
+    empty when there is no concrete signal or the model output is unusable.
+    """
+    from tui_gateway import anticipate as _ant
+
+    context = params.get("context") if isinstance(params.get("context"), dict) else {}
+    try:
+        limit = max(1, min(int(params.get("limit") or 3), 10))
+    except (TypeError, ValueError):
+        limit = 3
+
+    home = _ant.hermes_home()
+    session = _sessions.get(params.get("session_id") or "")
+    main_runtime = _main_runtime_from_agent(session.get("agent")) if session else None
+
+    sessions = []
+    try:
+        with _session_db(session or {}) as db:
+            if db is not None:
+                sessions = db.list_sessions_rich(
+                    limit=20, order_by_last_active=True, compact_rows=True
+                )
+    except Exception:
+        logger.debug("anticipate.suggest: session list unavailable", exc_info=True)
+
+    instructions, user_input = _ant.build_prompt(home, context, sessions, limit)
+    try:
+        from agent.oneshot import run_oneshot
+
+        text = run_oneshot(
+            instructions=instructions,
+            user_input=user_input,
+            task="anticipation",
+            max_tokens=600,
+            temperature=0.2,
+            main_runtime=main_runtime,
+        )
+    except Exception as e:
+        logger.warning("anticipate.suggest failed: %s", e)
+        return _err(rid, 5030, f"anticipation failed: {e}")
+
+    blocked = _ant.dismissed_labels(_ant.read_episodes(home))
+    return _ok(rid, {"suggestions": _ant.parse_suggestions(text, limit, blocked)})
+
+
+@method("anticipate.feedback")
+def _(rid, params: dict) -> dict:
+    """Record accepted/dismissed for a suggestion. Twice-dismissed labels go to MEMORY.md."""
+    from tui_gateway import anticipate as _ant
+
+    action = str(params.get("action") or "").strip()
+    label = str(params.get("label") or "").strip()
+    if action not in ("accepted", "dismissed") or not label:
+        return _err(rid, 4030, "anticipate.feedback requires label and action accepted|dismissed")
+
+    home = _ant.hermes_home()
+    _ant.append_episode(
+        home,
+        kind=action,
+        id=str(params.get("id") or ""),
+        label=label,
+        prompt=str(params.get("prompt") or "")[:500],
+    )
+    if action == "dismissed" and label in _ant.dismissed_labels(_ant.read_episodes(home)):
+        try:
+            from tools.memory_tool import load_on_disk_store
+
+            load_on_disk_store().add("memory", f"使用者不想被主動建議：「{label}」")
+        except Exception:
+            logger.debug("anticipate.feedback: memory add failed", exc_info=True)
+    return _ok(rid, {"ok": True})
+
+
 @method("handoff.request")
 def _(rid, params: dict) -> dict:
     """Queue a handoff of this session to a messaging platform.
@@ -3700,3 +3778,21 @@ def _(rid, params: dict) -> dict:
 def register(server) -> None:
     """Bind this module's handlers onto ``server``'s globals and registry."""
     _registry.install(server)
+
+
+@method("session.evidence")
+def _(rid, params: dict) -> dict:
+    """Native host supplies a freshly authorized profile; never use launch-profile fallback."""
+    try:
+        from hermes_cli.profiles import get_profile_dir
+        from tui_gateway.session_evidence import read_evidence
+        profile = params.get("profile")
+        if not isinstance(profile, str) or not profile or "/" in profile or "\\" in profile or profile in (".", ".."):
+            raise ValueError("Explicit profile required")
+        home = Path(get_profile_dir(profile))
+        if not (home / "state.db").is_file():
+            raise ValueError("Profile history unavailable")
+        result = read_evidence(home / "state.db", params.get("arguments") or {})
+        return _ok(rid, result)
+    except Exception:
+        return _err(rid, 4000, "History unavailable in the authorized profile")

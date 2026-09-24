@@ -295,6 +295,15 @@ def _(rid, params: dict) -> dict:
     # client renders it as a bubble. Whitelisted to "hidden" — display_kind
     # is a DB-only sidecar and this RPC must not mint arbitrary kinds.
     display_kind = "hidden" if params.get("display_kind") == "hidden" else None
+    if display_kind is None and isinstance(text, str) and text.strip():
+        # Anticipation episode log (tui_gateway/anticipate.py): one line per visible user turn,
+        # written here so it needs no plugin on any platform.
+        try:
+            from tui_gateway import anticipate
+
+            anticipate.append_episode(anticipate.hermes_home(), **anticipate.turn_episode(text, sid))
+        except Exception:
+            logger.debug("episode log failed", exc_info=True)
     # Typed bare stop phrase while backend voice mode is active ends the
     # voice chat instead of sending "stop" to the agent — the typed twin of
     # the spoken stop phrase (PR #73106), applied at the ONE server-side
